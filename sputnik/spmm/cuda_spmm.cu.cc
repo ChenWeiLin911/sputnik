@@ -161,7 +161,7 @@ struct SpmmKernel {
         column_indices_tile_array, Config::kBlockItemsK * threadIdx.y);
 
     // Create a loader for the sparse lhs matrix.
-    SparseTile sparse_tile_loader(n, row_offset, threadIdx.x, values,
+    SparseTile sparse_tile_loader(row_offset, threadIdx.x, values,
                                   column_indices, values_tile,
                                   column_indices_tile);
 

@@ -15,6 +15,8 @@
 #ifndef THIRD_PARTY_SPUTNIK_TILING_UTILS_H_
 #define THIRD_PARTY_SPUTNIK_TILING_UTILS_H_
 
+#include <cstdint>
+
 /**
  * @file @brief Utilities for mapping threads and thread blocks to matrix tiles.
  */
@@ -28,6 +30,13 @@ namespace sputnik {
  */
 template <typename OutType, typename InType>
 __device__ __forceinline__ OutType* OffsetCast(InType* ptr, int offset) {
+  return reinterpret_cast<OutType*>(
+      const_cast<char*>(reinterpret_cast<const char*>(ptr)) + offset);
+}
+
+// Dense SpMM inputs may require byte offsets beyond signed 32-bit range.
+template <typename OutType, typename InType>
+__device__ __forceinline__ OutType* OffsetCast64(InType* ptr, int64_t offset) {
   return reinterpret_cast<OutType*>(
       const_cast<char*>(reinterpret_cast<const char*>(ptr)) + offset);
 }

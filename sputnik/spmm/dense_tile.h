@@ -15,6 +15,8 @@
 #ifndef THIRD_PARTY_SPUTNIK_SPMM_DENSE_TILE_H_
 #define THIRD_PARTY_SPUTNIK_SPMM_DENSE_TILE_H_
 
+#include <cstdint>
+
 /**
  * @file @brief Defines functor for efficiently loading tiles from
  * a dense matrix based on sparse-matrix meta-data.
@@ -101,7 +103,7 @@ struct DenseTile {
   //
 
   // The number of columns in the rhs matrix in bytes.
-  const int rhs_columns_;
+  const int64_t rhs_columns_;
 
   // The dense matrix pointer in global memory.
   const Value *matrix_base_;
@@ -118,7 +120,7 @@ struct DenseTile {
                                        const ScalarValue *__restrict__ matrix,
                                        const ScalarIndex *row_offsets,
                                        ScalarValue *matrix_fragment)
-      : rhs_columns_(rhs_columns * sizeof(ScalarValue)) {
+      : rhs_columns_(int64_t(rhs_columns) * sizeof(ScalarValue)) {
     matrix_base_ =
         reinterpret_cast<const Value *>(matrix + offset) + thread_idx_x;
     row_offsets_base_ = row_offsets;
@@ -133,20 +135,15 @@ struct DenseTile {
 
 #pragma unroll
     for (int k_item_idx = 0; k_item_idx < kBlockItemsK; ++k_item_idx) {
-      // Load the row offsets and extract into 32-bit integer values.
-      int scaled_indices[kElementsPerScalar_];
-      Convert(row_offsets, scaled_indices);
+      // Shared memory holds unscaled column indices.
+      int column_indices[kElementsPerScalar_];
+      Convert(row_offsets, column_indices);
 #pragma unroll
       for (int elt_idx = 0; elt_idx < kElementsPerScalar_; ++elt_idx) {
-        // Possibly scale the indices s.t. they properly index into the
-        // right-hand size dense matrix.
-        if (TypeUtils<ScalarValue>::IsMixed()) {
-          scaled_indices[elt_idx] *= rhs_columns_;
-        }
-
-        // Increment the matrix pointer.
+        const int64_t byte_offset =
+            int64_t(column_indices[elt_idx]) * rhs_columns_;
         const Value *matrix =
-            OffsetCast<const Value>(matrix_base_, scaled_indices[elt_idx]);
+            OffsetCast64<const Value>(matrix_base_, byte_offset);
 #pragma unroll
         for (int x_item_idx = 0; x_item_idx < kThreadItemsX_; ++x_item_idx) {
           // NOTE: There are a few different ways we could have expressed
@@ -203,24 +200,19 @@ struct DenseTile {
            ++k_inner_idx) {
         const int k_item_idx = k_inner_idx + k_outer_idx * kResidueInnerLimit_;
 
-        // Load the row offsets and extract into 32-bit integer values.
-        int scaled_indices[kElementsPerScalar_];
-        Convert(row_offsets, scaled_indices);
+        // Shared memory holds unscaled column indices.
+        int column_indices[kElementsPerScalar_];
+        Convert(row_offsets, column_indices);
 
         // Load the weight from smem and extract into 32-bit float values.
         float lhs_values[kElementsPerScalar_];
         Convert(lhs_tile + k_item_idx, lhs_values);
 #pragma unroll
         for (int elt_idx = 0; elt_idx < kElementsPerScalar_; ++elt_idx) {
-          // Possibly scale the indices s.t. they properly index into the
-          // right-hand size dense matrix.
-          if (TypeUtils<ScalarValue>::IsMixed()) {
-            scaled_indices[elt_idx] *= rhs_columns_;
-          }
-
-          // Increment hte matrix pointer.
+          const int64_t byte_offset =
+              int64_t(column_indices[elt_idx]) * rhs_columns_;
           const Value *matrix =
-              OffsetCast<const Value>(matrix_base_, scaled_indices[elt_idx]);
+              OffsetCast64<const Value>(matrix_base_, byte_offset);
 #pragma unroll
           for (int x_item_idx = 0; x_item_idx < kThreadItemsX_; ++x_item_idx) {
             // NOTE: We special-case kThreadItemsX_ == 1 to generate cleaner

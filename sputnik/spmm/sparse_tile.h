@@ -67,15 +67,10 @@ struct SparseTile {
   /// Member variables.
   //
 
-  // The number of columns in the rhs matrix in bytes.
-  const int rhs_columns_;
-
   // The sparse matrix values array.
   const Value *values_;
 
-  // The sparse matrix column indices for each value. Scaled in ctor
-  // by sizeof(ScalarValue) s.t. offset is in bytes, and we can directly
-  // add to rhs matrix pointer after loading from smem.
+  // The sparse matrix column indices for each value.
   const Index *column_idxs_;
 
   // Smem tile for sparse matrix values.
@@ -86,12 +81,11 @@ struct SparseTile {
 
   // Constructor. Set the initial pointer offsets.
   __device__ __forceinline__
-  SparseTile(int rhs_columns, int offset, int thread_idx_x,
+  SparseTile(int offset, int thread_idx_x,
              const ScalarValue *__restrict__ values,
              const ScalarIndex *__restrict__ column_idxs,
              ScalarValue *values_tile, ScalarIndex *column_idxs_tile)
-      : rhs_columns_(rhs_columns * sizeof(ScalarValue)),
-        values_(reinterpret_cast<const Value *>(values + offset) +
+      : values_(reinterpret_cast<const Value *>(values + offset) +
                 thread_idx_x),
         column_idxs_(reinterpret_cast<const Index *>(column_idxs + offset) +
                      thread_idx_x),
@@ -113,15 +107,9 @@ struct SparseTile {
       // Load the values into smem.
       Store(sputnik::Load(values_), values_tile);
 
-      if (TypeUtils<ScalarValue>::IsMixed()) {
-        // If we're using 16-bit indices, don't scale to avoid overflow.
-        Store(sputnik::Load(column_idxs_), column_idxs_tile);
-      } else {
-        // Load the column indices into smem. Scale the index by the number
-        // of columns in the rhs matrix for our lookups into the dense rhs.
-        VectorCompute<Value>::Mul(rhs_columns_, sputnik::Load(column_idxs_),
-                                  column_idxs_tile);
-      }
+      // Keep raw column indices. DenseTile computes 64-bit byte offsets
+      // when accessing the rhs, so large dense matrices cannot overflow here.
+      Store(sputnik::Load(column_idxs_), column_idxs_tile);
 
       // Increment out pointers for the next iteration.
       values_ += kBlockWidth;
@@ -192,15 +180,7 @@ struct SparseTile {
       // Load the values into smem.
       Store(sputnik::Load(values), values_tile);
 
-      if (TypeUtils<ScalarValue>::IsMixed()) {
-        // If we're using 16-bit indices, don't scale to avoid overflow.
-        Store(sputnik::Load(column_idxs), column_idxs_tile);
-      } else {
-        // Load the column indices into smem. Scale the index by the number
-        // of columns in the rhs matrix for our lookups into the dense rhs.
-        VectorCompute<ScalarValue>::Mul(
-            rhs_columns_, sputnik::Load(column_idxs), column_idxs_tile);
-      }
+      Store(sputnik::Load(column_idxs), column_idxs_tile);
 
       // Increment our pointers for the next iteration.
       values += kBlockWidth;
